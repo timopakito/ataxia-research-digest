@@ -1,0 +1,23 @@
+# Search terms used against PubMed and ClinicalTrials.gov (English medical
+# terminology, as indexed by those databases). Edit to widen/narrow scope
+# (e.g. add specific SCA subtypes) without touching code.
+search_terms:
+  - "cerebellar ataxia"
+  - "spinocerebellar ataxia"
+  - "Friedreich ataxia"
+
+# French equivalents used for the Google News search, since French news
+# coverage uses French terminology rather than the English medical terms above.
+news_search_terms:
+  - "ataxie cérébelleuse"
+  - "ataxie spinocérébelleuse"
+  - "ataxie de Friedreich"
+
+# How many days back to look for new items on each run.
+lookback_days: 7
+
+# Language for the Google News RSS search (hl/gl/ceid params).
+news:
+  language: "fr"
+  country: "FR"
+  ceid: "FR:fr"
