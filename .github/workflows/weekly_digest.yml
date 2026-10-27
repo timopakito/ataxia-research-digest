@@ -27,11 +27,15 @@ jobs:
       - name: Run digest
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
           NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
         run: python -m src.main
+
+      - name: Upload digest PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: ataxia-digest
+          path: output/*.pdf
+          if-no-files-found: ignore
 
       - name: Commit updated state
         run: |

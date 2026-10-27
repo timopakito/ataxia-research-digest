@@ -2,7 +2,7 @@ from datetime import date
 
 from dotenv import load_dotenv
 
-from src import emailer, state, summarize
+from src import pdf, state, summarize
 from src.collectors import clinicaltrials, news, pubmed
 from src.config import load_sources
 
@@ -14,7 +14,7 @@ COLLECTORS = {
 
 
 def main():
-    load_dotenv()
+    load_dotenv(override=True)
     config = load_sources()
     seen = state.load_state()
 
@@ -28,15 +28,14 @@ def main():
         print(f"{source}: {len(items)} found, {len(new_items)} new")
 
     if total_new == 0:
-        print("Nothing new this week, skipping summary and email.")
+        print("Nothing new this week, skipping summary and PDF.")
         return
 
     digest = summarize.build_digest(new_items_by_source)
-    html_body = summarize.render_html(digest)
-    subject = f"Veille ataxies cérébelleuses — semaine du {date.today().isoformat()}"
+    title = f"Veille ataxies cérébelleuses — semaine du {date.today().isoformat()}"
 
-    emailer.send_digest(subject, html_body)
-    print(f"Digest sent ({total_new} new items).")
+    output_path = pdf.render_pdf(digest, title)
+    print(f"Digest written to {output_path} ({total_new} new items).")
 
     for source, new_items in new_items_by_source.items():
         seen.setdefault(source, [])

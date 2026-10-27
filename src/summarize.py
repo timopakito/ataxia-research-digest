@@ -1,10 +1,9 @@
-import html
 import json
 import os
 
 import anthropic
 
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 
 DIGEST_TOOL = {
     "name": "build_digest",
@@ -56,8 +55,8 @@ DIGEST_TOOL = {
 }
 
 SYSTEM_PROMPT = """Tu rédiges une lettre d'information hebdomadaire en français pour une \
-association qui accompagne des personnes atteintes d'ataxies cérébelleuses (ataxie de \
-Friedreich, ataxies spinocérébelleuses, etc.) et leurs familles.
+association qui accompagne des personnes atteintes d'ataxies cérébelleuses (toutes les ataxies \
+SAUF l'ataxie de Friedreich) et leurs familles.
 
 On te fournit une liste d'éléments bruts (essais cliniques, publications scientifiques, \
 actualités) trouvés cette semaine, chacun avec un titre, une URL et éventuellement un \
@@ -99,9 +98,55 @@ def _format_items_for_prompt(items_by_source):
     return "\n".join(blocks)
 
 
+def _incomplete(stop_reason, detail):
+    return RuntimeError(
+        f"Reponse Claude incomplete ou malformee (stop_reason={stop_reason!r}) : "
+        f"{detail}. Essaie d'augmenter max_tokens ou de reduire le nombre d'elements."
+    )
+
+
+def _validate_digest(digest, stop_reason):
+    """Sanity-check the tool_use input against the shape render_pdf expects.
+
+    The JSON schema passed to Claude is a generation hint, not an enforced
+    contract: a truncated response (stop_reason == "max_tokens") or a model
+    slip-up can still come back with the wrong shape, e.g. a 'sections' entry
+    that's a bare string instead of {"heading": ..., "items": [...]}. Catch
+    that here with a clear error instead of letting render_pdf crash deep
+    inside a loop.
+    """
+    if not isinstance(digest, dict) or "sections" not in digest:
+        raise _incomplete(stop_reason, "pas de 'sections' dans le digest")
+
+    if not isinstance(digest["sections"], list):
+        raise _incomplete(
+            stop_reason,
+            f"'sections' devrait etre une liste, recu {type(digest['sections']).__name__}",
+        )
+
+    for i, section in enumerate(digest["sections"]):
+        if not isinstance(section, dict) or "heading" not in section or "items" not in section:
+            raise _incomplete(
+                stop_reason,
+                f"sections[{i}] devrait etre un objet {{heading, items}}, recu {section!r}",
+            )
+        if not isinstance(section["items"], list):
+            raise _incomplete(
+                stop_reason,
+                f"sections[{i}]['items'] devrait etre une liste, recu {type(section['items']).__name__}",
+            )
+        for j, item in enumerate(section["items"]):
+            if not isinstance(item, dict) or not {"title", "url", "summary"} <= item.keys():
+                raise _incomplete(
+                    stop_reason,
+                    f"sections[{i}]['items'][{j}] devrait etre un objet "
+                    f"{{title, url, summary}}, recu {item!r}",
+                )
+
+
 def build_digest(items_by_source):
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    model = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
+    model = os.environ.get("ANTHROPIC_MODEL") or DEFAULT_MODEL
 
     user_content = (
         "Voici les nouveaux éléments trouvés cette semaine :\n\n"
@@ -110,7 +155,7 @@ def build_digest(items_by_source):
 
     response = client.messages.create(
         model=model,
-        max_tokens=4096,
+        max_tokens=8192,
         system=SYSTEM_PROMPT,
         tools=[DIGEST_TOOL],
         tool_choice={"type": "tool", "name": "build_digest"},
@@ -119,27 +164,10 @@ def build_digest(items_by_source):
 
     for block in response.content:
         if block.type == "tool_use" and block.name == "build_digest":
-            return block.input
+            digest = block.input
+            _validate_digest(digest, response.stop_reason)
+            return digest
 
-    raise RuntimeError("Claude did not return a build_digest tool call")
-
-
-def render_html(digest):
-    parts = [f"<p>{html.escape(digest['intro'])}</p>"]
-    for section in digest["sections"]:
-        if not section["items"]:
-            continue
-        parts.append(f"<h2>{html.escape(section['heading'])}</h2>")
-        parts.append("<ul>")
-        for item in section["items"]:
-            url = item["url"]
-            if not (url.startswith("http://") or url.startswith("https://")):
-                continue
-            title = html.escape(item["title"])
-            summary = html.escape(item["summary"])
-            safe_url = html.escape(url, quote=True)
-            parts.append(
-                f'<li><a href="{safe_url}">{title}</a><p>{summary}</p></li>'
-            )
-        parts.append("</ul>")
-    return "\n".join(parts)
+    raise RuntimeError(
+        f"Claude did not return a build_digest tool call (stop_reason={response.stop_reason!r})"
+    )

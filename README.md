@@ -1,55 +1,61 @@
-# Veille ataxies cérébelleuses
+# Ataxia Research Digest
 
-Pipeline hebdomadaire qui surveille PubMed, ClinicalTrials.gov et l'actualité (Google
-News) pour les ataxies cérébelleuses (ataxie de Friedreich, ataxies spinocérébelleuses),
-résume les nouveautés en français avec Claude, et envoie un email hebdomadaire à
-l'association.
+Automated weekly research watch on **cerebellar ataxias** for a French patient association.
+Every Monday, a GitHub Actions workflow collects the week's new clinical trials, scientific
+papers and news articles, asks Claude to turn them into a plain-language French newsletter,
+and publishes it as a PDF.
 
-## Fonctionnement
+![Sample digest](docs/sample-digest-preview-1.png)
 
-1. `src/collectors/` récupère les nouveaux essais cliniques, publications et actualités
-   des 7 derniers jours.
-2. `src/state.py` compare avec `data/seen_ids.json` pour ne garder que les éléments
-   jamais signalés auparavant.
-3. `src/summarize.py` envoie ces nouveaux éléments à l'API Claude, qui structure et
-   rédige un résumé en français accessible à un public non médical.
-4. `src/emailer.py` envoie le résumé par email via [Resend](https://resend.com).
-5. `data/seen_ids.json` est mis à jour et commité par le workflow GitHub Actions pour
-   ne pas re-signaler les mêmes éléments la semaine suivante.
+👉 [Example output (PDF)](docs/sample-digest.pdf)
 
-S'il n'y a aucun nouvel élément dans la semaine, aucun email n'est envoyé.
+## Why
 
-## Configuration
+Families and patients want to know what's new in research, but the sources are scattered,
+technical and in English. This pipeline does the monitoring and the translation into
+accessible French, with strict rules against inventing anything: every item links back to
+its original source.
 
-Copier `.env.example` vers `.env` et renseigner :
+## How it works
 
-- `ANTHROPIC_API_KEY` — clé API Claude (https://console.anthropic.com)
-- `RESEND_API_KEY` — clé API Resend (https://resend.com). **Le domaine d'envoi doit
-  être vérifié dans Resend** avant d'utiliser une adresse `EMAIL_FROM` sur ce domaine ;
-  pour tester rapidement sans domaine, Resend fournit un expéditeur de test.
-- `EMAIL_FROM` — adresse d'expédition
-- `EMAIL_TO` — un ou plusieurs destinataires séparés par des virgules
-- `NCBI_API_KEY` — optionnel, augmente la limite de requêtes PubMed
+```
+PubMed              ─┐
+ClinicalTrials.gov  ─┼─► dedup (seen_ids.json) ─► Claude, structured tool call ─► validation ─► PDF
+Google News (FR)    ─┘
+```
 
-Les termes de recherche (portée des maladies suivies) se modifient dans
-`config/sources.yaml` sans toucher au code.
+| Step | Module | Details |
+|---|---|---|
+| Collect | `src/collectors/` | PubMed E-utilities (esearch + efetch), ClinicalTrials.gov API v2 with pagination, Google News RSS with French search terms |
+| Deduplicate | `src/state.py` | Only items never reported before are kept; state is committed back to the repo by the workflow |
+| Summarize | `src/summarize.py` | Claude is forced to call a `build_digest` tool, so the answer comes back as structured JSON; the output is validated before rendering, with clear errors on truncated or malformed responses |
+| Render | `src/pdf.py` | ReportLab PDF with clickable titles; only `http(s)` links are kept |
 
-## Lancer en local
+The scope of the watch (diseases, look-back window, news language) lives in
+[`config/sources.yaml`](config/sources.yaml) and can be changed without touching the code.
+
+## Run it locally
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # then add your ANTHROPIC_API_KEY
 python -m src.main
 ```
 
-## Déploiement (GitHub Actions)
+The PDF is written to `output/digest-YYYY-MM-DD.pdf`. If nothing new was found, no PDF is produced.
 
-Le workflow `.github/workflows/weekly_digest.yml` tourne chaque lundi 07:00 UTC
-(modifiable) et peut aussi être lancé manuellement depuis l'onglet Actions
-(`workflow_dispatch`).
+## Deployment
 
-Ajouter les mêmes variables que `.env` comme secrets du dépôt GitHub :
-`Settings → Secrets and variables → Actions` :
-`ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_TO`, `NCBI_API_KEY` (optionnel).
+[`.github/workflows/weekly_digest.yml`](.github/workflows/weekly_digest.yml) runs every Monday
+at 07:00 UTC and can be triggered manually from the Actions tab. Add `ANTHROPIC_API_KEY`
+(and optionally `NCBI_API_KEY`) under *Settings → Secrets and variables → Actions*.
+Each run uploads the PDF as a workflow artifact and commits the updated `seen_ids.json`.
 
-Le workflow committe automatiquement `data/seen_ids.json` après chaque exécution.
+## Stack
+
+Python 3.12 · Anthropic API (tool use) · requests · feedparser · ReportLab · GitHub Actions
+
+## License
+
+MIT — see [LICENSE](LICENSE).
